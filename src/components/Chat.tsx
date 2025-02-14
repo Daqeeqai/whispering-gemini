@@ -219,7 +219,7 @@ export function Chat() {
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900">
+    <div className="flex h-screen bg-gradient-to-br from-[#000000] via-[#0EA5E9] to-[#000000]">
       <ChatSidebar
         chats={chatHistory}
         activeChat={activeChat}
@@ -242,7 +242,7 @@ export function Chat() {
               <div
                 className={`max-w-[80%] p-4 rounded-lg backdrop-blur-sm transition-all duration-300 ${
                   message.role === "user"
-                    ? "bg-white/10 text-white ml-auto"
+                    ? "bg-[#0EA5E9]/10 text-white ml-auto"
                     : "bg-black/30 text-white/90"
                 }`}
               >
@@ -292,13 +292,13 @@ export function Chat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type a message..."
-            className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/50 focus-visible:ring-purple-500"
+            className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/50 focus-visible:ring-[#0EA5E9]"
             disabled={isLoading}
           />
           <Button 
             type="submit" 
             disabled={isLoading}
-            className="shrink-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 transition-all duration-300"
+            className="shrink-0 bg-[#0EA5E9] hover:bg-[#0EA5E9]/90 transition-all duration-300"
           >
             {isLoading ? (
               <StopCircle className="h-5 w-5" />
