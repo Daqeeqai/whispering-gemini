@@ -99,27 +99,40 @@ export function Chat() {
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
 
-      let fileContent = "";
+      let parts = [];
+      
+      // Add conversation context
+      parts.push({
+        text: `Previous conversation:\n${conversationContext}\n\nCurrent message: ${userInput}`
+      });
+
+      // Handle file if present
       if (uploadedFile) {
         if (uploadedFile.type.startsWith('image/')) {
-          const reader = new FileReader();
-          fileContent = await new Promise((resolve) => {
-            reader.onload = () => resolve(reader.result as string);
+          const imageData = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const base64String = reader.result as string;
+              // Extract the base64 data without the data URL prefix
+              const base64Data = base64String.split(',')[1];
+              resolve(base64Data);
+            };
             reader.readAsDataURL(uploadedFile);
           });
+
+          parts.push({
+            inlineData: {
+              mimeType: uploadedFile.type,
+              data: imageData
+            }
+          });
         } else {
-          fileContent = await uploadedFile.text();
+          const textContent = await uploadedFile.text();
+          parts.push({
+            text: `File content: ${textContent}`
+          });
         }
       }
-
-      const fullPrompt = `
-        Previous conversation:
-        ${conversationContext}
-
-        ${uploadedFile ? `Analyze this ${uploadedFile.type.startsWith('image/') ? 'image' : 'file content'}: ${fileContent}` : ''}
-        
-        Current message: ${userInput}
-      `;
 
       const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
         method: "POST",
@@ -128,12 +141,20 @@ export function Chat() {
         },
         body: JSON.stringify({
           contents: [{
-            parts: [{ text: fullPrompt }]
+            parts: parts
           }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 32,
+            topP: 1,
+            maxOutputTokens: 2048,
+          },
         }),
       });
 
       if (!response.ok) {
+        const errorData = await response.json();
+        console.error("API Error:", errorData);
         throw new Error("Failed to generate response");
       }
 
