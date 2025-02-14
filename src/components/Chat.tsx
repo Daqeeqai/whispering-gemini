@@ -1,16 +1,18 @@
-
 import { useState, useRef, useEffect } from "react";
-import { Paperclip, Send, StopCircle } from "lucide-react";
+import { Paperclip, Send, StopCircle, Plus } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useToast } from "../hooks/use-toast";
 import { ChatSidebar } from "./ChatSidebar";
 import { v4 as uuidv4 } from "uuid";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  fileUrl?: string;
+  fileType?: string;
 }
 
 interface ChatHistory {
@@ -55,7 +57,26 @@ export function Chat() {
 
       setFile(selectedFile);
       
-      // Convert file to base64 for preview
+      const fileExt = selectedFile.name.split('.').pop();
+      const fileName = `${uuidv4()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('chat_files')
+        .upload(fileName, selectedFile);
+
+      if (uploadError) {
+        toast({
+          title: "Upload failed",
+          description: "Failed to upload file",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat_files')
+        .getPublicUrl(fileName);
+
       const reader = new FileReader();
       reader.onload = async () => {
         const base64String = reader.result as string;
@@ -91,7 +112,6 @@ export function Chat() {
     const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
     try {
-      // Get last 20 messages for context
       const contextMessages = messages.slice(-20);
       const conversationContext = contextMessages
         .map(msg => `${msg.role}: ${msg.content}`)
@@ -158,7 +178,6 @@ export function Chat() {
       };
       setMessages(prev => [...prev, assistantMessage]);
       
-      // Update chat history
       setChatHistory(prev => prev.map(chat => 
         chat.id === activeChat
           ? { ...chat, messages: [...chat.messages, userMessage, assistantMessage] }
@@ -192,18 +211,26 @@ export function Chat() {
     }
   };
 
+  const startNewChat = () => {
+    setActiveChat(null);
+    setMessages([]);
+    setInput("");
+    clearFile();
+  };
+
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900">
       <ChatSidebar
         chats={chatHistory}
         activeChat={activeChat}
         onChatSelect={handleChatSelect}
         onChatDelete={handleChatDelete}
+        onNewChat={startNewChat}
       />
-      <div className="flex-1 flex flex-col h-screen max-w-4xl mx-auto p-4">
+      <div className="flex-1 flex flex-col h-screen max-w-4xl mx-auto p-6">
         <div 
           ref={chatContainerRef}
-          className="flex-1 overflow-y-auto space-y-4 mb-4 p-4 rounded-lg glass-morphism"
+          className="flex-1 overflow-y-auto space-y-4 mb-4 p-4 rounded-xl bg-black/20 backdrop-blur-xl border border-white/10 custom-scrollbar"
         >
           {messages.map((message, index) => (
             <div
@@ -213,19 +240,26 @@ export function Chat() {
               }`}
             >
               <div
-                className={`max-w-[80%] p-4 rounded-lg message-transition ${
+                className={`max-w-[80%] p-4 rounded-lg backdrop-blur-sm transition-all duration-300 ${
                   message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-secondary-foreground"
+                    ? "bg-white/10 text-white ml-auto"
+                    : "bg-black/30 text-white/90"
                 }`}
               >
+                {message.fileUrl && message.fileType?.startsWith('image/') && (
+                  <img 
+                    src={message.fileUrl} 
+                    alt="Uploaded content"
+                    className="max-w-full rounded-lg mb-2 border border-white/20"
+                  />
+                )}
                 <p className="whitespace-pre-wrap">{message.content}</p>
               </div>
             </div>
           ))}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-secondary rounded-lg p-4">
+              <div className="bg-black/30 backdrop-blur-sm rounded-lg p-4">
                 <div className="typing-indicator">
                   <span></span>
                   <span></span>
@@ -236,7 +270,7 @@ export function Chat() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+        <form onSubmit={handleSubmit} className="flex items-center gap-3">
           <Input
             ref={fileInputRef}
             type="file"
@@ -250,7 +284,7 @@ export function Chat() {
             variant="outline"
             size="icon"
             onClick={() => fileInputRef.current?.click()}
-            className="shrink-0"
+            className="shrink-0 bg-white/5 border-white/10 hover:bg-white/10 text-white"
           >
             <Paperclip className="h-5 w-5" />
           </Button>
@@ -258,10 +292,14 @@ export function Chat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type a message..."
-            className="flex-1"
+            className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/50 focus-visible:ring-purple-500"
             disabled={isLoading}
           />
-          <Button type="submit" disabled={isLoading} className="shrink-0">
+          <Button 
+            type="submit" 
+            disabled={isLoading}
+            className="shrink-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 transition-all duration-300"
+          >
             {isLoading ? (
               <StopCircle className="h-5 w-5" />
             ) : (
@@ -270,13 +308,13 @@ export function Chat() {
           </Button>
         </form>
         {file && (
-          <div className="mt-2 p-2 bg-secondary rounded-lg flex items-center justify-between">
-            <span className="truncate">{file.name}</span>
+          <div className="mt-2 p-2 bg-white/5 backdrop-blur-sm rounded-lg flex items-center justify-between border border-white/10">
+            <span className="truncate text-white/80">{file.name}</span>
             <Button
               variant="ghost"
               size="sm"
               onClick={clearFile}
-              className="ml-2"
+              className="ml-2 hover:bg-red-500/20 text-white/80 hover:text-white"
             >
               Clear
             </Button>
