@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Paperclip, Send, StopCircle, Plus } from "lucide-react";
+import { Paperclip, Send, StopCircle, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useToast } from "../hooks/use-toast";
@@ -29,6 +29,7 @@ export function Chat() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +44,22 @@ export function Chat() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (file) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setFilePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setFilePreview(null);
+      }
+    } else {
+      setFilePreview(null);
+    }
+  }, [file]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
@@ -56,45 +73,9 @@ export function Chat() {
       }
 
       setFile(selectedFile);
-      
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${uuidv4()}.${fileExt}`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('chat_files')
-        .upload(fileName, selectedFile);
-
-      if (uploadError) {
-        toast({
-          title: "Upload failed",
-          description: "Failed to upload file",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('chat_files')
-        .getPublicUrl(fileName);
-
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64String = reader.result as string;
-        const fileContent = selectedFile.type.startsWith('image/') 
-          ? `Analyze this image: ${base64String}`
-          : `Analyze this file content: ${base64String}`;
-          
-        setInput(fileContent);
-      };
-      
-      if (selectedFile.type.startsWith('image/')) {
-        reader.readAsDataURL(selectedFile);
-      } else {
-        reader.readAsText(selectedFile);
-      }
 
       toast({
-        title: "File uploaded",
+        title: "File ready",
         description: selectedFile.name,
       });
     }
@@ -102,12 +83,13 @@ export function Chat() {
 
   const clearFile = () => {
     setFile(null);
+    setFilePreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  const generateResponse = async (userInput: string) => {
+  const generateResponse = async (userInput: string, uploadedFile: File | null) => {
     const GEMINI_API_KEY = "AIzaSyAxbXjO0yTziA1ZJCu1I9833cZPcYZNUHo";
     const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
@@ -117,7 +99,27 @@ export function Chat() {
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
 
-      const fullPrompt = `Previous conversation:\n${conversationContext}\n\nCurrent message: ${userInput}`;
+      let fileContent = "";
+      if (uploadedFile) {
+        if (uploadedFile.type.startsWith('image/')) {
+          const reader = new FileReader();
+          fileContent = await new Promise((resolve) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(uploadedFile);
+          });
+        } else {
+          fileContent = await uploadedFile.text();
+        }
+      }
+
+      const fullPrompt = `
+        Previous conversation:
+        ${conversationContext}
+
+        ${uploadedFile ? `Analyze this ${uploadedFile.type.startsWith('image/') ? 'image' : 'file content'}: ${fileContent}` : ''}
+        
+        Current message: ${userInput}
+      `;
 
       const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
         method: "POST",
@@ -147,17 +149,47 @@ export function Chat() {
     e.preventDefault();
     if (!input.trim() && !file) return;
 
+    let fileUrl = null;
+    let fileType = null;
+
+    if (file) {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${uuidv4()}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('chat_files')
+        .upload(fileName, file);
+
+      if (uploadError) {
+        toast({
+          title: "Upload failed",
+          description: "Failed to upload file",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat_files')
+        .getPublicUrl(fileName);
+
+      fileUrl = publicUrl;
+      fileType = file.type;
+    }
+
     const userMessage: Message = {
       role: "user",
-      content: input,
+      content: input || (file ? `Sent a ${file.type.startsWith('image/') ? 'photo' : 'file'}` : ''),
       timestamp: new Date(),
+      fileUrl,
+      fileType,
     };
 
     if (!activeChat) {
       const newChatId = uuidv4();
       const newChat: ChatHistory = {
         id: newChatId,
-        title: input.slice(0, 30) + "...",
+        title: input || file?.name || "New Chat",
         messages: [userMessage],
         timestamp: new Date(),
       };
@@ -170,7 +202,7 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      const response = await generateResponse(input);
+      const response = await generateResponse(input, file);
       const assistantMessage: Message = {
         role: "assistant",
         content: response,
@@ -191,7 +223,7 @@ export function Chat() {
       });
     } finally {
       setIsLoading(false);
-      if (file) clearFile();
+      clearFile();
     }
   };
 
@@ -270,6 +302,26 @@ export function Chat() {
           )}
         </div>
 
+        {filePreview && (
+          <div className="mb-4 p-4 bg-black/20 backdrop-blur-xl rounded-lg border border-white/10">
+            <div className="relative">
+              <img 
+                src={filePreview} 
+                alt="File preview" 
+                className="max-h-48 rounded-lg mx-auto"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={clearFile}
+                className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="flex items-center gap-3">
           <Input
             ref={fileInputRef}
@@ -307,7 +359,7 @@ export function Chat() {
             )}
           </Button>
         </form>
-        {file && (
+        {file && !filePreview && (
           <div className="mt-2 p-2 bg-white/5 backdrop-blur-sm rounded-lg flex items-center justify-between border border-white/10">
             <span className="truncate text-white/80">{file.name}</span>
             <Button
